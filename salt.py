@@ -11,10 +11,12 @@ except ImportError:
     import pandas as pd
     MODE = 'web'
 
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-from openpyxl import Workbook
-from PIL import Image, ImageTk
+from PIL import Image
+if MODE == 'desktop':
+    from PIL import ImageTk
+    from reportlab.lib.pagesizes import letter
+    from reportlab.pdfgen import canvas
+    from openpyxl import Workbook
 
 FILE_NAME = "expenses.csv"
 CATEGORIES_FILE = "categories.txt"
