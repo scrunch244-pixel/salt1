@@ -1,7 +1,16 @@
 import csv
 from datetime import datetime
-import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext, filedialog
+import io
+
+try:
+    import tkinter as tk
+    from tkinter import ttk, messagebox, scrolledtext, filedialog
+    MODE = 'desktop'
+except ImportError:
+    import streamlit as st
+    import pandas as pd
+    MODE = 'web'
+
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from openpyxl import Workbook
@@ -941,65 +950,348 @@ def reports_and_closure_gui(root):
     tk.Button(visa_cash_frame, text="تصدير إلى Excel", command=export_visa_cash_monthly_excel).pack(pady=10)
 
 
+# Web versions of the functions
+def add_expense_web():
+    st.header("إضافة مصروف")
+    with st.form("add_expense_form"):
+        category = st.selectbox("القسم", CATEGORIES)
+        amount = st.number_input("المبلغ", min_value=0.0, step=0.01)
+        date = st.date_input("التاريخ", value=datetime.now().date())
+        notes = st.text_input("ملاحظات")
+        submitted = st.form_submit_button("إضافة")
+        if submitted:
+            if amount <= 0:
+                st.error("المبلغ يجب أن يكون أكبر من صفر")
+            else:
+                date_str = date.strftime("%Y-%m-%d")
+                with open(FILE_NAME, "a", newline="", encoding="utf-8") as f:
+                    writer = csv.writer(f)
+                    writer.writerow([date_str, category, amount, notes])
+                st.success("تم إضافة المصروف بنجاح")
+
+def show_expenses_web():
+    st.header("عرض كل المصروفات")
+    try:
+        df = pd.read_csv(FILE_NAME, encoding="utf-8")
+        st.dataframe(df)
+        # Delete functionality
+        if not df.empty:
+            selected_index = st.selectbox("اختر مصروف للحذف", df.index, format_func=lambda x: f"{df.loc[x, 'التاريخ']} - {df.loc[x, 'القسم']} - {df.loc[x, 'المبلغ']} - {df.loc[x, 'ملاحظات']}")
+            if st.button("حذف المصروف المحدد"):
+                if st.button("تأكيد الحذف"):
+                    df = df.drop(selected_index)
+                    df.to_csv(FILE_NAME, index=False, encoding="utf-8")
+                    st.success("تم حذف المصروف بنجاح")
+                    st.rerun()
+    except FileNotFoundError:
+        st.write("لا توجد مصروفات بعد")
+
+def total_by_category_web():
+    st.header("إجمالي المصروفات حسب القسم")
+    from collections import defaultdict
+    totals = defaultdict(float)
+    try:
+        with open(FILE_NAME, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                totals[row["القسم"]] += float(row["المبلغ"])
+    except FileNotFoundError:
+        pass
+    if totals:
+        for cat, total in sorted(totals.items()):
+            if total > 0:
+                st.write(f"{cat}: {total:.2f} جنيه")
+    else:
+        st.write("لا توجد مصروفات بعد")
+
+def monthly_reports_web():
+    st.header("تقارير شهرية")
+    monthly_totals = {}
+    try:
+        with open(FILE_NAME, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                date = row["التاريخ"]
+                month_year = date[:7]
+                amount = float(row["المبلغ"])
+                if month_year not in monthly_totals:
+                    monthly_totals[month_year] = 0
+                monthly_totals[month_year] += amount
+    except FileNotFoundError:
+        pass
+    if monthly_totals:
+        for month, total in sorted(monthly_totals.items()):
+            st.write(f"{month}: {total:.2f} جنيه")
+    else:
+        st.write("لا توجد مصروفات بعد")
+
+def detailed_monthly_reports_web():
+    st.header("تقارير شهرية مفصلة")
+    monthly_expenses = {}
+    try:
+        with open(FILE_NAME, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                date = row["التاريخ"]
+                month_year = date[:7]
+                if month_year not in monthly_expenses:
+                    monthly_expenses[month_year] = []
+                monthly_expenses[month_year].append(row)
+    except FileNotFoundError:
+        pass
+    if monthly_expenses:
+        for month, expenses in sorted(monthly_expenses.items()):
+            st.subheader(f"الشهر: {month}")
+            total = sum(float(expense['المبلغ']) for expense in expenses)
+            for expense in expenses:
+                st.write(f"التاريخ: {expense['التاريخ']}, القسم: {expense['القسم']}, المبلغ: {expense['المبلغ']}, ملاحظات: {expense['ملاحظات']}")
+            st.write(f"الإجمالي: {total:.2f} جنيه")
+    else:
+        st.write("لا توجد مصروفات بعد")
+
+def add_category_web():
+    st.header("إدارة الأقسام")
+    new_cat = st.text_input("اسم القسم الجديد")
+    if st.button("إضافة قسم"):
+        if new_cat and new_cat not in CATEGORIES:
+            CATEGORIES.append(new_cat)
+            save_categories()
+            st.success(f"تم إضافة القسم: {new_cat}")
+        elif new_cat in CATEGORIES:
+            st.error("القسم موجود بالفعل")
+        else:
+            st.error("أدخل اسم القسم")
+    delete_cat = st.selectbox("حذف قسم موجود", CATEGORIES)
+    if st.button("حذف قسم"):
+        if delete_cat in DEFAULT_CATEGORIES:
+            st.error("لا يمكن حذف الأقسام الافتراضية")
+        else:
+            # Check if category is used
+            try:
+                with open(FILE_NAME, "r", encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        if row["القسم"] == delete_cat:
+                            st.error("لا يمكن حذف القسم لأنه مستخدم في مصروفات")
+                            return
+            except FileNotFoundError:
+                pass
+            CATEGORIES.remove(delete_cat)
+            save_categories()
+            st.success(f"تم حذف القسم: {delete_cat}")
+
+def reports_and_closure_web():
+    st.header("تقارير وإغلاق")
+    tab1, tab2, tab3, tab4 = st.tabs(["إغلاق اليوم", "تقرير يومي", "تقرير شهري", "تقرير فيزا وكاش شهري"])
+    with tab1:
+        st.subheader("إغلاق اليوم")
+        with st.form("daily_closure_form"):
+            date = st.date_input("التاريخ", value=datetime.now().date())
+            visa = st.number_input("مبلغ الفيزا", min_value=0.0, step=0.01)
+            cash = st.number_input("مبلغ الكاش", min_value=0.0, step=0.01)
+            expenses = st.number_input("مبلغ المصروفات", min_value=0.0, step=0.01)
+            notes = st.text_input("ملاحظات")
+            submitted = st.form_submit_button("إدخال")
+            if submitted:
+                date_str = date.strftime("%Y-%m-%d")
+                with open(FILE_NAME, "a", newline="", encoding="utf-8") as f:
+                    writer = csv.writer(f)
+                    if visa > 0:
+                        writer.writerow([date_str, "فيزا", visa, notes])
+                    if cash > 0:
+                        writer.writerow([date_str, "كاش", cash, notes])
+                    if expenses > 0:
+                        writer.writerow([date_str, "مصروفات", expenses, notes])
+                st.success("تم حفظ الإدخال بنجاح")
+    with tab2:
+        st.subheader("تقرير يومي")
+        if st.button("عرض التقرير اليومي"):
+            today = datetime.now().strftime("%Y-%m-%d")
+            daily_expenses = []
+            total = 0
+            try:
+                with open(FILE_NAME, "r", encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        if row["التاريخ"] == today:
+                            daily_expenses.append(row)
+                            total += float(row["المبلغ"])
+            except FileNotFoundError:
+                pass
+            if daily_expenses:
+                st.write(f"تقرير اليوم: {today}")
+                for expense in daily_expenses:
+                    st.write(f"القسم: {expense['القسم']}, المبلغ: {expense['المبلغ']}, ملاحظات: {expense['ملاحظات']}")
+                st.write(f"الإجمالي: {total:.2f} جنيه")
+            else:
+                st.write(f"لا توجد مصروفات لليوم {today}")
+    with tab3:
+        st.subheader("تقرير شهري")
+        if st.button("عرض التقرير الشهري"):
+            current_month = datetime.now().strftime("%Y-%m")
+            monthly_expenses = []
+            total = 0
+            try:
+                with open(FILE_NAME, "r", encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        if row["التاريخ"].startswith(current_month):
+                            monthly_expenses.append(row)
+                            total += float(row["المبلغ"])
+            except FileNotFoundError:
+                pass
+            if monthly_expenses:
+                st.write(f"تقرير الشهر: {current_month}")
+                for expense in monthly_expenses:
+                    st.write(f"التاريخ: {expense['التاريخ']}, القسم: {expense['القسم']}, المبلغ: {expense['المبلغ']}, ملاحظات: {expense['ملاحظات']}")
+                st.write(f"الإجمالي: {total:.2f} جنيه")
+            else:
+                st.write(f"لا توجد مصروفات للشهر {current_month}")
+    with tab4:
+        st.subheader("تقرير فيزا وكاش شهري")
+        if st.button("عرض تقرير فيزا وكاش الشهري"):
+            current_month = datetime.now().strftime("%Y-%m")
+            visa_total = 0
+            cash_total = 0
+            special_total = 0
+            expenses_total = 0
+            visa_expenses = []
+            cash_expenses = []
+            special_expenses = []
+            expenses_expenses = []
+            try:
+                with open(FILE_NAME, "r", encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        if row["التاريخ"].startswith(current_month):
+                            if row["القسم"] == "فيزا":
+                                visa_total += float(row["المبلغ"])
+                                visa_expenses.append(row)
+                            elif row["القسم"] == "كاش":
+                                cash_total += float(row["المبلغ"])
+                                cash_expenses.append(row)
+                            elif row["القسم"] == "مصروفات خاصة":
+                                special_total += float(row["المبلغ"])
+                                special_expenses.append(row)
+                            elif row["القسم"] == "مصروفات":
+                                expenses_total += float(row["المبلغ"])
+                                expenses_expenses.append(row)
+            except FileNotFoundError:
+                pass
+            if visa_expenses or cash_expenses or special_expenses or expenses_expenses:
+                st.write(f"تقرير فيزا وكاش ومصروفات للشهر: {current_month}")
+                if visa_expenses:
+                    st.write("فيزا:")
+                    for expense in visa_expenses:
+                        st.write(f"  التاريخ: {expense['التاريخ']}, المبلغ: {expense['المبلغ']}, ملاحظات: {expense['ملاحظات']}")
+                    st.write(f"إجمالي الفيزا: {visa_total:.2f} جنيه")
+                if cash_expenses:
+                    st.write("كاش:")
+                    for expense in cash_expenses:
+                        st.write(f"  التاريخ: {expense['التاريخ']}, المبلغ: {expense['المبلغ']}, ملاحظات: {expense['ملاحظات']}")
+                    st.write(f"إجمالي الكاش: {cash_total:.2f} جنيه")
+                if expenses_expenses:
+                    st.write("مصروفات:")
+                    for expense in expenses_expenses:
+                        st.write(f"  التاريخ: {expense['التاريخ']}, المبلغ: {expense['المبلغ']}, ملاحظات: {expense['ملاحظات']}")
+                    st.write(f"إجمالي المصروفات: {expenses_total:.2f} جنيه")
+                net_visa_cash = visa_total + cash_total - expenses_total
+                st.write(f"صافي الفيزا والكاش (بعد خصم المصروفات): {net_visa_cash:.2f} جنيه")
+                if special_expenses:
+                    st.write("مصروفات خاصة:")
+                    for expense in special_expenses:
+                        st.write(f"  التاريخ: {expense['التاريخ']}, المبلغ: {expense['المبلغ']}, ملاحظات: {expense['ملاحظات']}")
+                    st.write(f"إجمالي المصروفات الخاصة: {special_total:.2f} جنيه")
+                total = net_visa_cash + special_total
+                st.write(f"الإجمالي الكلي: {total:.2f} جنيه")
+            else:
+                st.write(f"لا توجد مصروفات فيزا أو كاش أو خاصة أو مصروفات للشهر {current_month}")
+
 def main():
     init_file()
+    if MODE == 'desktop':
+        root = tk.Tk()
+        root.title("إدارة المصروفات Salt&Crunch ")
+        root.geometry("1000x800")
+        root.configure(bg='#f0f0f0')
 
-    root = tk.Tk()
-    root.title("إدارة المصروفات Salt&Crunch ")
-    root.geometry("1000x800")
-    root.configure(bg='#f0f0f0')
+        # Set a modern font
+        default_font = ('Arial', 12, 'bold')
+        title_font = ('Arial', 16, 'bold')
 
-    # Set a modern font
-    default_font = ('Arial', 12, 'bold')
-    title_font = ('Arial', 16, 'bold')
+        # Load background image
+        original_bg_image = Image.open("WhatsApp Image 2025-12-25 at 12.03.46 AM.jpeg")
 
-    # Load background image
-    original_bg_image = Image.open("WhatsApp Image 2025-12-25 at 12.03.46 AM.jpeg")
+        # Create canvas for background
+        canvas = tk.Canvas(root, bg='#f0f0f0')
+        canvas.pack(fill="both", expand=True)
 
-    # Create canvas for background
-    canvas = tk.Canvas(root, bg='#f0f0f0')
-    canvas.pack(fill="both", expand=True)
+        # Resize image to fixed 1000x700
+        resized_image = original_bg_image.resize((1000, 700), Image.Resampling.BICUBIC)
+        bg_photo = ImageTk.PhotoImage(resized_image)
+        canvas.create_image(0, 0, image=bg_photo, anchor="nw")
+        canvas.image = bg_photo  # Keep a reference to prevent garbage collection
 
-    # Resize image to fixed 1000x700
-    resized_image = original_bg_image.resize((1000, 700), Image.Resampling.BICUBIC)
-    bg_photo = ImageTk.PhotoImage(resized_image)
-    canvas.create_image(0, 0, image=bg_photo, anchor="nw")
-    canvas.image = bg_photo  # Keep a reference to prevent garbage collection
+        # Title label
+        title_label = tk.Label(root, text="إدارة المصروفات Salt&Crunch", font=title_font, bg='#4a90e2', fg='white', padx=20, pady=10)
+        title_label.place(relx=0.5, rely=0.1, anchor="center")
 
-    # Title label
-    title_label = tk.Label(root, text="إدارة المصروفات Salt&Crunch", font=title_font, bg='#4a90e2', fg='white', padx=20, pady=10)
-    title_label.place(relx=0.5, rely=0.1, anchor="center")
+        # Floating button for reports and closure at top left
+        closure_button = tk.Button(root, text="تقارير وإغلاق", command=lambda: reports_and_closure_gui(root), bg='#28a745', fg='white', font=('Arial', 10, 'bold'), relief='raised', bd=2, padx=10, pady=5)
+        closure_button.place(x=10, y=10)
 
-    # Floating button for reports and closure at top left
-    closure_button = tk.Button(root, text="تقارير وإغلاق", command=lambda: reports_and_closure_gui(root), bg='#28a745', fg='white', font=('Arial', 10, 'bold'), relief='raised', bd=2, padx=10, pady=5)
-    closure_button.place(x=10, y=10)
+        frame = tk.Frame(root, bg='#f0f0f0', bd=0, relief='flat')
+        frame.place(relx=0.5, rely=0.55, anchor="center")
 
-    frame = tk.Frame(root, bg='#f0f0f0', bd=0, relief='flat')
-    frame.place(relx=0.5, rely=0.55, anchor="center")
+        button_style = {
+            'font': default_font,
+            'bg': '#ff8c00',
+            'fg': 'white',
+            'activebackground': '#ff6600',
+            'activeforeground': 'white',
+            'relief': 'raised',
+            'bd': 2,
+            'padx': 20,
+            'pady': 10,
+            'width': 30,
+            'height': 2
+        }
 
-    button_style = {
-        'font': default_font,
-        'bg': '#ff8c00',
-        'fg': 'white',
-        'activebackground': '#ff6600',
-        'activeforeground': 'white',
-        'relief': 'raised',
-        'bd': 2,
-        'padx': 20,
-        'pady': 10,
-        'width': 30,
-        'height': 2
-    }
+        tk.Button(frame, text="إضافة مصروف", command=lambda: add_expense_gui(root), **button_style).pack(side=tk.TOP, pady=10)
+        tk.Button(frame, text="إضافة قسم", command=lambda: add_category_gui(root), **button_style).pack(side=tk.TOP, pady=10)
+        tk.Button(frame, text="عرض كل المصروفات", command=lambda: show_expenses_gui(root), **button_style).pack(side=tk.TOP, pady=10)
+        tk.Button(frame, text="إجمالي المصروفات حسب القسم", command=lambda: total_by_category_gui(root), **button_style).pack(side=tk.TOP, pady=10)
+        tk.Button(frame, text="تقارير شهرية", command=lambda: monthly_reports_gui(root), **button_style).pack(side=tk.TOP, pady=10)
+        tk.Button(frame, text="تقارير شهرية مفصلة", command=lambda: detailed_monthly_reports_gui(root), **button_style).pack(side=tk.TOP, pady=10)
+        tk.Button(frame, text="خروج", command=root.quit, bg='#e74c3c', activebackground='#c0392b', **{k: v for k, v in button_style.items() if k not in ['bg', 'activebackground']}).pack(side=tk.TOP, pady=10)
 
-    tk.Button(frame, text="إضافة مصروف", command=lambda: add_expense_gui(root), **button_style).pack(side=tk.TOP, pady=10)
-    tk.Button(frame, text="إضافة قسم", command=lambda: add_category_gui(root), **button_style).pack(side=tk.TOP, pady=10)
-    tk.Button(frame, text="عرض كل المصروفات", command=lambda: show_expenses_gui(root), **button_style).pack(side=tk.TOP, pady=10)
-    tk.Button(frame, text="إجمالي المصروفات حسب القسم", command=lambda: total_by_category_gui(root), **button_style).pack(side=tk.TOP, pady=10)
-    tk.Button(frame, text="تقارير شهرية", command=lambda: monthly_reports_gui(root), **button_style).pack(side=tk.TOP, pady=10)
-    tk.Button(frame, text="تقارير شهرية مفصلة", command=lambda: detailed_monthly_reports_gui(root), **button_style).pack(side=tk.TOP, pady=10)
-    tk.Button(frame, text="خروج", command=root.quit, bg='#e74c3c', activebackground='#c0392b', **{k: v for k, v in button_style.items() if k not in ['bg', 'activebackground']}).pack(side=tk.TOP, pady=10)
-
-    root.mainloop()
+        root.mainloop()
+    else:
+        st.set_page_config(page_title="إدارة المصروفات Salt&Crunch", page_icon="💰", layout="wide")
+        st.title("إدارة المصروفات Salt&Crunch")
+        # Load and display background image
+        try:
+            bg_image = Image.open("WhatsApp Image 2025-12-25 at 12.03.46 AM.jpeg")
+            st.image(bg_image, use_column_width=True)
+        except FileNotFoundError:
+            pass
+        # Sidebar for navigation
+        st.sidebar.title("القائمة")
+        page = st.sidebar.radio("اختر الصفحة", ["إضافة مصروف", "إضافة قسم", "عرض كل المصروفات", "إجمالي المصروفات حسب القسم", "تقارير شهرية", "تقارير شهرية مفصلة", "تقارير وإغلاق"])
+        if page == "إضافة مصروف":
+            add_expense_web()
+        elif page == "إضافة قسم":
+            add_category_web()
+        elif page == "عرض كل المصروفات":
+            show_expenses_web()
+        elif page == "إجمالي المصروفات حسب القسم":
+            total_by_category_web()
+        elif page == "تقارير شهرية":
+            monthly_reports_web()
+        elif page == "تقارير شهرية مفصلة":
+            detailed_monthly_reports_web()
+        elif page == "تقارير وإغلاق":
+            reports_and_closure_web()
 
 if __name__ == "__main__":
     main()
