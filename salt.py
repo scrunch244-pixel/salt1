@@ -37,8 +37,11 @@ def load_csv_from_gist():
     response = requests.get(GIST_URL)
     if response.status_code == 200:
         gist_data = response.json()
-        csv_content = gist_data['files']['expenses.csv']['content']
-        return csv_content
+        if 'files' in gist_data and 'expenses.csv' in gist_data['files']:
+            csv_content = gist_data['files']['expenses.csv']['content']
+            return csv_content
+        else:
+            return "التاريخ,القسم,المبلغ,ملاحظات\n"
     else:
         return "التاريخ,القسم,المبلغ,ملاحظات\n"
 
