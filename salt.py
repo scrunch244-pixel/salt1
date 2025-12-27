@@ -29,7 +29,7 @@ if MODE == 'desktop':
 
 # GitHub Gist configuration for persistent storage
 GIST_ID = "e5e979572c4cb5bfe8fcf1d4d5ddb6af"
-TOKEN = "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"
+TOKEN = "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"
 GIST_URL = f"https://api.github.com/gists/{GIST_ID}"
 HEADERS = {"Authorization": f"token {TOKEN}"}
 
