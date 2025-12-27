@@ -21,6 +21,9 @@ def save_csv_to_gist(csv_content):
         }
     }
     response = requests.patch(GIST_URL, headers=HEADERS, json=data)
+    print(f"Response status: {response.status_code}")
+    if response.status_code != 200:
+        print(f"Error: {response.text}")
     return response.status_code == 200
 
 csv_content = load_csv_local()
