@@ -1,15 +1,21 @@
 import csv
 from datetime import datetime
 import io
+import os
 
-try:
-    import tkinter as tk
-    from tkinter import ttk, messagebox, scrolledtext, filedialog
-    MODE = 'desktop'
-except ImportError:
+if 'STREAMLIT_SERVER_HEADLESS' in os.environ:
     import streamlit as st
     import pandas as pd
     MODE = 'web'
+else:
+    try:
+        import tkinter as tk
+        from tkinter import ttk, messagebox, scrolledtext, filedialog
+        MODE = 'desktop'
+    except ImportError:
+        import streamlit as st
+        import pandas as pd
+        MODE = 'web'
 
 from PIL import Image
 if MODE == 'desktop':
