@@ -28,8 +28,8 @@ if MODE == 'desktop':
     from openpyxl import Workbook
 
 # GitHub Gist configuration for persistent storage
-GIST_ID = "180cd598a8a46a4e554eeb6e2c9b8c0e"
-TOKEN = "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"
+GIST_ID = "e5e979572c4cb5bfe8fcf1d4d5ddb6af"
+TOKEN = "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"
 GIST_URL = f"https://api.github.com/gists/{GIST_ID}"
 HEADERS = {"Authorization": f"token {TOKEN}"}
 
@@ -37,8 +37,8 @@ def load_csv_from_gist():
     response = requests.get(GIST_URL)
     if response.status_code == 200:
         gist_data = response.json()
-        if 'files' in gist_data and 'expenses.csv' in gist_data['files']:
-            csv_content = gist_data['files']['expenses.csv']['content']
+        if 'files' in gist_data and 'expenses' in gist_data['files']:
+            csv_content = gist_data['files']['expenses']['content']
             return csv_content
         else:
             return "التاريخ,القسم,المبلغ,ملاحظات\n"
@@ -48,7 +48,7 @@ def load_csv_from_gist():
 def save_csv_to_gist(csv_content):
     data = {
         "files": {
-            "expenses.csv": {
+            "expenses": {
                 "content": csv_content
             }
         }
