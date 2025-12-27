@@ -2,6 +2,7 @@ import csv
 from datetime import datetime
 import io
 import os
+import requests
 
 if 'STREAMLIT_SERVER_HEADLESS' in os.environ:
     import streamlit as st
@@ -23,6 +24,32 @@ if MODE == 'desktop':
     from reportlab.lib.pagesizes import letter
     from reportlab.pdfgen import canvas
     from openpyxl import Workbook
+
+# GitHub Gist configuration for persistent storage
+GIST_ID = "180cd598a8a46a4e554eeb6e2c9b8c0e"
+TOKEN = "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"
+GIST_URL = f"https://api.github.com/gists/{GIST_ID}"
+HEADERS = {"Authorization": f"token {TOKEN}"}
+
+def load_csv_from_gist():
+    response = requests.get(GIST_URL)
+    if response.status_code == 200:
+        gist_data = response.json()
+        csv_content = gist_data['files']['expenses.csv']['content']
+        return csv_content
+    else:
+        return "التاريخ,القسم,المبلغ,ملاحظات\n"
+
+def save_csv_to_gist(csv_content):
+    data = {
+        "files": {
+            "expenses.csv": {
+                "content": csv_content
+            }
+        }
+    }
+    response = requests.patch(GIST_URL, headers=HEADERS, json=data)
+    return response.status_code == 200
 
 FILE_NAME = "expenses.csv"
 CATEGORIES_FILE = "categories.txt"
@@ -972,15 +999,22 @@ def add_expense_web():
                 st.error("المبلغ يجب أن يكون أكبر من صفر")
             else:
                 date_str = date.strftime("%Y-%m-%d")
-                with open(FILE_NAME, "a", newline="", encoding="utf-8") as f:
-                    writer = csv.writer(f)
-                    writer.writerow([date_str, category, amount, notes])
-                st.success("تم إضافة المصروف بنجاح")
+                csv_content = load_csv_from_gist()
+                if not csv_content.strip():
+                    csv_content = "التاريخ,القسم,المبلغ,ملاحظات\n"
+                csv_content += f"{date_str},{category},{amount},{notes}\n"
+                if save_csv_to_gist(csv_content):
+                    st.success("تم إضافة المصروف بنجاح")
+                else:
+                    st.error("فشل في حفظ البيانات")
 
 def show_expenses_web():
     st.header("عرض كل المصروفات")
-    try:
-        df = pd.read_csv(FILE_NAME, encoding="utf-8")
+    csv_content = load_csv_from_gist()
+    if not csv_content.strip():
+        st.write("لا توجد مصروفات بعد")
+    else:
+        df = pd.read_csv(io.StringIO(csv_content), encoding="utf-8")
         st.dataframe(df)
         # Delete functionality
         if not df.empty:
@@ -988,23 +1022,22 @@ def show_expenses_web():
             if st.button("حذف المصروف المحدد"):
                 if st.button("تأكيد الحذف"):
                     df = df.drop(selected_index)
-                    df.to_csv(FILE_NAME, index=False, encoding="utf-8")
-                    st.success("تم حذف المصروف بنجاح")
-                    st.rerun()
-    except FileNotFoundError:
-        st.write("لا توجد مصروفات بعد")
+                    csv_content = df.to_csv(index=False)
+                    if save_csv_to_gist(csv_content):
+                        st.success("تم حذف المصروف بنجاح")
+                        st.rerun()
+                    else:
+                        st.error("فشل في حفظ البيانات")
 
 def total_by_category_web():
     st.header("إجمالي المصروفات حسب القسم")
     from collections import defaultdict
     totals = defaultdict(float)
-    try:
-        with open(FILE_NAME, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                totals[row["القسم"]] += float(row["المبلغ"])
-    except FileNotFoundError:
-        pass
+    csv_content = load_csv_from_gist()
+    if csv_content.strip():
+        df = pd.read_csv(io.StringIO(csv_content), encoding="utf-8")
+        for _, row in df.iterrows():
+            totals[row["القسم"]] += float(row["المبلغ"])
     if totals:
         for cat, total in sorted(totals.items()):
             if total > 0:
@@ -1015,18 +1048,16 @@ def total_by_category_web():
 def monthly_reports_web():
     st.header("تقارير شهرية")
     monthly_totals = {}
-    try:
-        with open(FILE_NAME, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                date = row["التاريخ"]
-                month_year = date[:7]
-                amount = float(row["المبلغ"])
-                if month_year not in monthly_totals:
-                    monthly_totals[month_year] = 0
-                monthly_totals[month_year] += amount
-    except FileNotFoundError:
-        pass
+    csv_content = load_csv_from_gist()
+    if csv_content.strip():
+        df = pd.read_csv(io.StringIO(csv_content), encoding="utf-8")
+        for _, row in df.iterrows():
+            date = row["التاريخ"]
+            month_year = date[:7]
+            amount = float(row["المبلغ"])
+            if month_year not in monthly_totals:
+                monthly_totals[month_year] = 0
+            monthly_totals[month_year] += amount
     if monthly_totals:
         for month, total in sorted(monthly_totals.items()):
             st.write(f"{month}: {total:.2f} جنيه")
@@ -1036,17 +1067,15 @@ def monthly_reports_web():
 def detailed_monthly_reports_web():
     st.header("تقارير شهرية مفصلة")
     monthly_expenses = {}
-    try:
-        with open(FILE_NAME, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                date = row["التاريخ"]
-                month_year = date[:7]
-                if month_year not in monthly_expenses:
-                    monthly_expenses[month_year] = []
-                monthly_expenses[month_year].append(row)
-    except FileNotFoundError:
-        pass
+    csv_content = load_csv_from_gist()
+    if csv_content.strip():
+        df = pd.read_csv(io.StringIO(csv_content), encoding="utf-8")
+        for _, row in df.iterrows():
+            date = row["التاريخ"]
+            month_year = date[:7]
+            if month_year not in monthly_expenses:
+                monthly_expenses[month_year] = []
+            monthly_expenses[month_year].append(row)
     if monthly_expenses:
         for month, expenses in sorted(monthly_expenses.items()):
             st.subheader(f"الشهر: {month}")
@@ -1075,15 +1104,12 @@ def add_category_web():
             st.error("لا يمكن حذف الأقسام الافتراضية")
         else:
             # Check if category is used
-            try:
-                with open(FILE_NAME, "r", encoding="utf-8") as f:
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        if row["القسم"] == delete_cat:
-                            st.error("لا يمكن حذف القسم لأنه مستخدم في مصروفات")
-                            return
-            except FileNotFoundError:
-                pass
+            csv_content = load_csv_from_gist()
+            if csv_content.strip():
+                df = pd.read_csv(io.StringIO(csv_content), encoding="utf-8")
+                if delete_cat in df["القسم"].values:
+                    st.error("لا يمكن حذف القسم لأنه مستخدم في مصروفات")
+                    return
             CATEGORIES.remove(delete_cat)
             save_categories()
             st.success(f"تم حذف القسم: {delete_cat}")
@@ -1102,30 +1128,32 @@ def reports_and_closure_web():
             submitted = st.form_submit_button("إدخال")
             if submitted:
                 date_str = date.strftime("%Y-%m-%d")
-                with open(FILE_NAME, "a", newline="", encoding="utf-8") as f:
-                    writer = csv.writer(f)
-                    if visa > 0:
-                        writer.writerow([date_str, "فيزا", visa, notes])
-                    if cash > 0:
-                        writer.writerow([date_str, "كاش", cash, notes])
-                    if expenses > 0:
-                        writer.writerow([date_str, "مصروفات", expenses, notes])
-                st.success("تم حفظ الإدخال بنجاح")
+                csv_content = load_csv_from_gist()
+                if not csv_content.strip():
+                    csv_content = "التاريخ,القسم,المبلغ,ملاحظات\n"
+                if visa > 0:
+                    csv_content += f"{date_str},فيزا,{visa},{notes}\n"
+                if cash > 0:
+                    csv_content += f"{date_str},كاش,{cash},{notes}\n"
+                if expenses > 0:
+                    csv_content += f"{date_str},مصروفات,{expenses},{notes}\n"
+                if save_csv_to_gist(csv_content):
+                    st.success("تم حفظ الإدخال بنجاح")
+                else:
+                    st.error("فشل في حفظ البيانات")
     with tab2:
         st.subheader("تقرير يومي")
         if st.button("عرض التقرير اليومي"):
             today = datetime.now().strftime("%Y-%m-%d")
             daily_expenses = []
             total = 0
-            try:
-                with open(FILE_NAME, "r", encoding="utf-8") as f:
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        if row["التاريخ"] == today:
-                            daily_expenses.append(row)
-                            total += float(row["المبلغ"])
-            except FileNotFoundError:
-                pass
+            csv_content = load_csv_from_gist()
+            if csv_content.strip():
+                df = pd.read_csv(io.StringIO(csv_content), encoding="utf-8")
+                for _, row in df.iterrows():
+                    if row["التاريخ"] == today:
+                        daily_expenses.append(row.to_dict())
+                        total += float(row["المبلغ"])
             if daily_expenses:
                 st.write(f"تقرير اليوم: {today}")
                 for expense in daily_expenses:
@@ -1139,15 +1167,13 @@ def reports_and_closure_web():
             current_month = datetime.now().strftime("%Y-%m")
             monthly_expenses = []
             total = 0
-            try:
-                with open(FILE_NAME, "r", encoding="utf-8") as f:
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        if row["التاريخ"].startswith(current_month):
-                            monthly_expenses.append(row)
-                            total += float(row["المبلغ"])
-            except FileNotFoundError:
-                pass
+            csv_content = load_csv_from_gist()
+            if csv_content.strip():
+                df = pd.read_csv(io.StringIO(csv_content), encoding="utf-8")
+                for _, row in df.iterrows():
+                    if row["التاريخ"].startswith(current_month):
+                        monthly_expenses.append(row.to_dict())
+                        total += float(row["المبلغ"])
             if monthly_expenses:
                 st.write(f"تقرير الشهر: {current_month}")
                 for expense in monthly_expenses:
@@ -1167,25 +1193,23 @@ def reports_and_closure_web():
             cash_expenses = []
             special_expenses = []
             expenses_expenses = []
-            try:
-                with open(FILE_NAME, "r", encoding="utf-8") as f:
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        if row["التاريخ"].startswith(current_month):
-                            if row["القسم"] == "فيزا":
-                                visa_total += float(row["المبلغ"])
-                                visa_expenses.append(row)
-                            elif row["القسم"] == "كاش":
-                                cash_total += float(row["المبلغ"])
-                                cash_expenses.append(row)
-                            elif row["القسم"] == "مصروفات خاصة":
-                                special_total += float(row["المبلغ"])
-                                special_expenses.append(row)
-                            elif row["القسم"] == "مصروفات":
-                                expenses_total += float(row["المبلغ"])
-                                expenses_expenses.append(row)
-            except FileNotFoundError:
-                pass
+            csv_content = load_csv_from_gist()
+            if csv_content.strip():
+                df = pd.read_csv(io.StringIO(csv_content), encoding="utf-8")
+                for _, row in df.iterrows():
+                    if row["التاريخ"].startswith(current_month):
+                        if row["القسم"] == "فيزا":
+                            visa_total += float(row["المبلغ"])
+                            visa_expenses.append(row.to_dict())
+                        elif row["القسم"] == "كاش":
+                            cash_total += float(row["المبلغ"])
+                            cash_expenses.append(row.to_dict())
+                        elif row["القسم"] == "مصروفات خاصة":
+                            special_total += float(row["المبلغ"])
+                            special_expenses.append(row.to_dict())
+                        elif row["القسم"] == "مصروفات":
+                            expenses_total += float(row["المبلغ"])
+                            expenses_expenses.append(row.to_dict())
             if visa_expenses or cash_expenses or special_expenses or expenses_expenses:
                 st.write(f"تقرير فيزا وكاش ومصروفات للشهر: {current_month}")
                 if visa_expenses:
