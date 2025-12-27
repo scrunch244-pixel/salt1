@@ -2,6 +2,7 @@ import csv
 from datetime import datetime
 import io
 import os
+import pandas as pd
 import requests
 
 if 'STREAMLIT_SERVER_HEADLESS' in os.environ:
@@ -12,6 +13,7 @@ else:
     try:
         import tkinter as tk
         from tkinter import ttk, messagebox, scrolledtext, filedialog
+        import pandas as pd
         MODE = 'desktop'
     except ImportError:
         import streamlit as st
@@ -50,6 +52,17 @@ def save_csv_to_gist(csv_content):
     }
     response = requests.patch(GIST_URL, headers=HEADERS, json=data)
     return response.status_code == 200
+
+def load_csv_local():
+    try:
+        with open(FILE_NAME, "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return "التاريخ,القسم,المبلغ,ملاحظات\n"
+
+def save_csv_local(csv_content):
+    with open(FILE_NAME, "w", encoding="utf-8") as f:
+        f.write(csv_content)
 
 FILE_NAME = "expenses.csv"
 CATEGORIES_FILE = "categories.txt"
@@ -1114,6 +1127,42 @@ def add_category_web():
             save_categories()
             st.success(f"تم حذف القسم: {delete_cat}")
 
+def sync_data_web():
+    st.header("مزامنة البيانات")
+    st.write("يمكنك هنا مزامنة البيانات بين التخزين المحلي والـ Gist.")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("تحميل البيانات من Gist إلى المحلي"):
+            csv_content = load_csv_from_gist()
+            if csv_content.strip():
+                save_csv_local(csv_content)
+                st.success("تم تحميل البيانات من Gist إلى الملف المحلي بنجاح")
+            else:
+                st.warning("لا توجد بيانات في Gist")
+
+    with col2:
+        if st.button("رفع البيانات من المحلي إلى Gist"):
+            csv_content = load_csv_local()
+            if csv_content.strip():
+                if save_csv_to_gist(csv_content):
+                    st.success("تم رفع البيانات من الملف المحلي إلى Gist بنجاح")
+                else:
+                    st.error("فشل في رفع البيانات إلى Gist")
+            else:
+                st.warning("لا توجد بيانات في الملف المحلي")
+
+    st.subheader("حالة البيانات")
+    gist_content = load_csv_from_gist()
+    local_content = load_csv_local()
+
+    gist_lines = len(gist_content.strip().split('\n')) if gist_content.strip() else 0
+    local_lines = len(local_content.strip().split('\n')) if local_content.strip() else 0
+
+    st.write(f"عدد السطور في Gist: {gist_lines}")
+    st.write(f"عدد السطور في الملف المحلي: {local_lines}")
+
 def reports_and_closure_web():
     st.header("تقارير وإغلاق")
     tab1, tab2, tab3, tab4 = st.tabs(["إغلاق اليوم", "تقرير يومي", "تقرير شهري", "تقرير فيزا وكاش شهري"])
@@ -1309,7 +1358,7 @@ def main():
             pass
         # Sidebar for navigation
         st.sidebar.title("القائمة")
-        page = st.sidebar.radio("اختر الصفحة", ["إضافة مصروف", "إضافة قسم", "عرض كل المصروفات", "إجمالي المصروفات حسب القسم", "تقارير شهرية", "تقارير شهرية مفصلة", "تقارير وإغلاق"])
+        page = st.sidebar.radio("اختر الصفحة", ["إضافة مصروف", "إضافة قسم", "عرض كل المصروفات", "إجمالي المصروفات حسب القسم", "تقارير شهرية", "تقارير شهرية مفصلة", "تقارير وإغلاق", "مزامنة البيانات"])
         if page == "إضافة مصروف":
             add_expense_web()
         elif page == "إضافة قسم":
@@ -1324,6 +1373,8 @@ def main():
             detailed_monthly_reports_web()
         elif page == "تقارير وإغلاق":
             reports_and_closure_web()
+        elif page == "مزامنة البيانات":
+            sync_data_web()
 
 if __name__ == "__main__":
     main()
